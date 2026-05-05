@@ -1,693 +1,728 @@
-python
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Note Keeper - Менеджер заметок с фильтрацией и JSON-хранилищем
+Random Password Generator - Генератор случайных паролей
 Author: Каюмов Марсель
 Version: 1.0.0
+Description: Приложение для генерации безопасных паролей с настройками параметров
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
+import random
+import string
 import json
 import os
 from datetime import datetime
-import re
 from typing import List, Dict, Optional
-from dataclasses import dataclass, asdict
-from unittest.mock import patch
 import unittest
 
 
-@dataclass
-class Note:
-    """Класс заметки с валидацией"""
-    title: str
-    content: str
-    priority: str  # 'Высокий', 'Средний', 'Низкий'
-    category: str
-    created_at: str
-    note_id: int
+class PasswordHistory:
+    """Класс для управления историей паролей"""
     
-    def __post_init__(self):
-        self.validate()
-    
-    def validate(self):
-        if not self.title or not self.title.strip():
-            raise ValueError("Заголовок не может быть пустым")
-        if len(self.title) > 100:
-            raise ValueError("Заголовок не может превышать 100 символов")
-        if len(self.content) > 5000:
-            raise ValueError("Содержание не может превышать 5000 символов")
-        if self.priority not in ['Высокий', 'Средний', 'Низкий']:
-            raise ValueError("Некорректный приоритет")
-        if not self.category or not self.category.strip():
-            raise ValueError("Категория не может быть пустой")
-    
-    def to_dict(self) -> Dict:
-        return asdict(self)
-    
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'Note':
-        return cls(**data)
-
-
-class NoteStorage:
-    """Класс для работы с JSON-хранилищем"""
-    
-    def __init__(self, filename: str = "notes.json"):
+    def __init__(self, filename: str = "password_history.json"):
         self.filename = filename
-        self.notes: List[Note] = []
-        self.next_id = 1
-        self.load()
+        self.history: List[Dict] = []
+        self.load_history()
     
-    def save(self) -> bool:
-        """Сохранить заметки в JSON файл"""
+    def save_history(self) -> bool:
+        """Сохранить историю в JSON файл"""
         try:
-            data = {
-                "next_id": self.next_id,
-                "notes": [note.to_dict() for note in self.notes]
-            }
             with open(self.filename, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(self.history, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
             print(f"Ошибка сохранения: {e}")
             return False
     
-    def load(self) -> bool:
-        """Загрузить заметки из JSON файла"""
+    def load_history(self) -> bool:
+        """Загрузить историю из JSON файла"""
         if not os.path.exists(self.filename):
             return True
         
         try:
             with open(self.filename, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            self.next_id = data.get("next_id", 1)
-            self.notes = [Note.from_dict(note_data) for note_data in data.get("notes", [])]
+                self.history = json.load(f)
             return True
         except Exception as e:
             print(f"Ошибка загрузки: {e}")
             return False
     
-    def add_note(self, note: Note) -> bool:
-        """Добавить новую заметку"""
+    def add_password(self, password: str, length: int, settings: Dict) -> bool:
+        """Добавить пароль в историю"""
         try:
-            note.validate()
-            note.note_id = self.next_id
-            note.created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.notes.append(note)
-            self.next_id += 1
-            self.save()
+            entry = {
+                "id": len(self.history) + 1,
+                "password": password,
+                "length": length,
+                "settings": settings,
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            self.history.insert(0, entry)  # Новые записи в начало
+            # Ограничим историю 100 записями
+            if len(self.history) > 100:
+                self.history = self.history[:100]
+            self.save_history()
             return True
-        except ValueError as e:
-            raise e
         except Exception as e:
-            raise Exception(f"Ошибка добавления заметки: {e}")
+            print(f"Ошибка добавления: {e}")
+            return False
     
-    def remove_note(self, note_id: int) -> bool:
-        """Удалить заметку по ID"""
-        initial_len = len(self.notes)
-        self.notes = [note for note in self.notes if note.note_id != note_id]
-        if len(self.notes) < initial_len:
-            self.save()
-            return True
-        return False
+    def clear_history(self) -> bool:
+        """Очистить историю"""
+        self.history = []
+        return self.save_history()
     
-    def get_all_notes(self) -> List[Note]:
-        return self.notes.copy()
-    
-    def filter_notes(self, category: Optional[str] = None, 
-                     priority: Optional[str] = None,
-                     search_text: Optional[str] = None) -> List[Note]:
-        """Фильтрация заметок по различным критериям"""
-        result = self.notes.copy()
-        
-        if category and category != "Все":
-            result = [n for n in result if n.category == category]
-        
-        if priority and priority != "Все":
-            result = [n for n in result if n.priority == priority]
-        
-        if search_text and search_text.strip():
-            search_lower = search_text.lower().strip()
-            result = [n for n in result 
-                     if search_lower in n.title.lower() or 
-                        search_lower in n.content.lower()]
-        
-        return result
+    def get_history(self) -> List[Dict]:
+        """Получить всю историю"""
+        return self.history.copy()
 
 
-class NoteApp:
+class PasswordGenerator:
+    """Класс для генерации паролей"""
+    
+    def __init__(self):
+        self.letters_lower = string.ascii_lowercase
+        self.letters_upper = string.ascii_uppercase
+        self.digits = string.digits
+        self.special_chars = "!@#$%^&*()_+-=[]{}|;:,.<>?"
+    
+    def generate(self, length: int, use_uppercase: bool, use_lowercase: bool, 
+                 use_digits: bool, use_special: bool) -> str:
+        """
+        Генерация пароля на основе параметров
+        
+        Args:
+            length: длина пароля
+            use_uppercase: использовать заглавные буквы
+            use_lowercase: использовать строчные буквы
+            use_digits: использовать цифры
+            use_special: использовать спецсимволы
+        
+        Returns:
+            сгенерированный пароль
+        """
+        if length < 4:
+            raise ValueError("Минимальная длина пароля - 4 символа")
+        if length > 128:
+            raise ValueError("Максимальная длина пароля - 128 символов")
+        
+        charset = ""
+        if use_lowercase:
+            charset += self.letters_lower
+        if use_uppercase:
+            charset += self.letters_upper
+        if use_digits:
+            charset += self.digits
+        if use_special:
+            charset += self.special_chars
+        
+        if not charset:
+            raise ValueError("Выберите хотя бы один тип символов")
+        
+        # Генерация пароля
+        password = ''.join(random.choice(charset) for _ in range(length))
+        
+        # Дополнительная проверка: убедимся, что пароль содержит все выбранные типы
+        # (для коротких паролей это может быть сложно)
+        if length >= 4:
+            password = self._ensure_all_types(password, charset, use_uppercase, 
+                                              use_lowercase, use_digits, use_special)
+        
+        return password
+    
+    def _ensure_all_types(self, password: str, charset: str, use_uppercase: bool,
+                          use_lowercase: bool, use_digits: bool, use_special: bool) -> str:
+        """Гарантирует, что пароль содержит все выбранные типы символов"""
+        password_list = list(password)
+        types_to_check = []
+        
+        if use_uppercase and not any(c in self.letters_upper for c in password):
+            types_to_check.append(random.choice(self.letters_upper))
+        if use_lowercase and not any(c in self.letters_lower for c in password):
+            types_to_check.append(random.choice(self.letters_lower))
+        if use_digits and not any(c in self.digits for c in password):
+            types_to_check.append(random.choice(self.digits))
+        if use_special and not any(c in self.special_chars for c in password):
+            types_to_check.append(random.choice(self.special_chars))
+        
+        # Заменяем первые символы для гарантии
+        for i, char in enumerate(types_to_check):
+            if i < len(password_list):
+                password_list[i] = char
+        
+        # Перемешиваем результат
+        random.shuffle(password_list)
+        return ''.join(password_list)
+    
+    def generate_multiple(self, count: int, length: int, use_uppercase: bool,
+                          use_lowercase: bool, use_digits: bool, use_special: bool) -> List[str]:
+        """Генерирует несколько паролей"""
+        passwords = []
+        for _ in range(min(count, 10)):  # Ограничим 10 паролями за раз
+            passwords.append(self.generate(length, use_uppercase, use_lowercase,
+                                           use_digits, use_special))
+        return passwords
+    
+    def check_strength(self, password: str) -> Dict:
+        """Проверка сложности пароля"""
+        strength = 0
+        feedback = []
+        
+        if len(password) >= 12:
+            strength += 1
+            feedback.append("✓ Хорошая длина")
+        elif len(password) >= 8:
+            feedback.append("⚠ Приемлемая длина")
+        else:
+            feedback.append("✗ Слишком короткий")
+        
+        if any(c in string.ascii_lowercase for c in password):
+            strength += 1
+            feedback.append("✓ Есть строчные буквы")
+        else:
+            feedback.append("✗ Нет строчных букв")
+        
+        if any(c in string.ascii_uppercase for c in password):
+            strength += 1
+            feedback.append("✓ Есть заглавные буквы")
+        else:
+            feedback.append("✗ Нет заглавных букв")
+        
+        if any(c in string.digits for c in password):
+            strength += 1
+            feedback.append("✓ Есть цифры")
+        else:
+            feedback.append("✗ Нет цифр")
+        
+        if any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in password):
+            strength += 1
+            feedback.append("✓ Есть спецсимволы")
+        else:
+            feedback.append("✗ Нет спецсимволов")
+        
+        # Оценка сложности
+        if strength >= 4:
+            level = "Очень сложный"
+            color = "green"
+        elif strength >= 3:
+            level = "Сложный"
+            color = "orange"
+        elif strength >= 2:
+            level = "Средний"
+            color = "yellow"
+        else:
+            level = "Слабый"
+            color = "red"
+        
+        return {
+            "level": level,
+            "color": color,
+            "score": strength,
+            "feedback": feedback
+        }
+
+
+class PasswordGeneratorApp:
     """Главное приложение с GUI"""
     
     def __init__(self, root):
         self.root = root
-        self.root.title("Note Keeper - Менеджер заметок")
-        self.root.geometry("1200x700")
+        self.root.title("Random Password Generator - Генератор паролей")
+        self.root.geometry("1000x700")
         self.root.resizable(True, True)
         
-        # Инициализация хранилища
-        self.storage = NoteStorage()
+        # Инициализация компонентов
+        self.generator = PasswordGenerator()
+        self.history = PasswordHistory()
         
-        # Категории
-        self.categories = ["Все", "Работа", "Личное", "Учеба", "Идеи", "Другое"]
-        
-        # Настройка стилей
+        # Настройка внешнего вида
         self.setup_styles()
         
         # Создание интерфейса
         self.create_widgets()
         
-        # Обновление списка заметок
-        self.refresh_notes_list()
+        # Загрузка истории
+        self.refresh_history()
     
     def setup_styles(self):
-        """Настройка стилей интерфейса"""
-        style = ttk.Style()
-        style.theme_use('clam')
-        
-        # Цветовая схема
+        """Настройка стилей"""
         self.colors = {
-            'bg': '#f0f0f0',
-            'button': '#4CAF50',
-            'button_hover': '#45a049',
+            'bg': '#2b2b2b',
+            'fg': '#ffffff',
+            'accent': '#4CAF50',
+            'button': '#2196F3',
+            'button_hover': '#1976D2',
             'error': '#f44336',
-            'success': '#2196F3'
+            'warning': '#ff9800',
+            'success': '#4caf50'
         }
         
         self.root.configure(bg=self.colors['bg'])
+        
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TLabel', background=self.colors['bg'], foreground=self.colors['fg'])
+        style.configure('TLabelframe', background=self.colors['bg'], foreground=self.colors['fg'])
+        style.configure('TLabelframe.Label', background=self.colors['bg'], foreground=self.colors['fg'])
+        style.configure('TButton', background=self.colors['button'])
     
     def create_widgets(self):
-        """Создание всех виджетов интерфейса"""
+        """Создание всех виджетов"""
         # Основной контейнер
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        # Настройка весов для растягивания
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(0, weight=1)
         
-        # Левая панель - форма добавления
-        self.create_input_panel(main_frame)
+        # Левая панель - настройки
+        self.create_settings_panel(main_frame)
         
-        # Правая панель - список заметок
-        self.create_notes_panel(main_frame)
+        # Правая панель - история
+        self.create_history_panel(main_frame)
         
-        # Нижняя панель - фильтры
-        self.create_filter_panel(main_frame)
+        # Нижняя панель - результат
+        self.create_result_panel(main_frame)
     
-    def create_input_panel(self, parent):
-        """Панель для добавления заметок"""
-        input_frame = ttk.LabelFrame(parent, text="Добавить заметку", padding="10")
-        input_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
+    def create_settings_panel(self, parent):
+        """Панель настроек генерации"""
+        settings_frame = ttk.LabelFrame(parent, text="Настройки пароля", padding="15")
+        settings_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 10))
         
-        # Заголовок
-        ttk.Label(input_frame, text="Заголовок:*").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
-        self.title_entry = ttk.Entry(input_frame, width=40)
-        self.title_entry.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
+        # Длина пароля
+        ttk.Label(settings_frame, text="Длина пароля:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
         
-        # Категория
-        ttk.Label(input_frame, text="Категория:*").grid(row=2, column=0, sticky=tk.W, pady=(0, 5))
-        self.category_combo = ttk.Combobox(input_frame, values=self.categories[1:], width=37)
-        self.category_combo.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
-        self.category_combo.set("Личное")
+        length_control_frame = ttk.Frame(settings_frame)
+        length_control_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
         
-        # Приоритет
-        ttk.Label(input_frame, text="Приоритет:*").grid(row=4, column=0, sticky=tk.W, pady=(0, 5))
-        self.priority_var = tk.StringVar(value="Средний")
-        priority_frame = ttk.Frame(input_frame)
-        priority_frame.grid(row=5, column=0, sticky=tk.W, pady=(0, 15))
+        self.length_var = tk.IntVar(value=12)
+        self.length_scale = ttk.Scale(length_control_frame, from_=4, to=128, 
+                                      orient=tk.HORIZONTAL, variable=self.length_var,
+                                      command=self.update_length_label)
+        self.length_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
         
-        ttk.Radiobutton(priority_frame, text="Высокий", variable=self.priority_var, 
-                       value="Высокий").pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Radiobutton(priority_frame, text="Средний", variable=self.priority_var, 
-                       value="Средний").pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Radiobutton(priority_frame, text="Низкий", variable=self.priority_var, 
-                       value="Низкий").pack(side=tk.LEFT)
+        self.length_label = ttk.Label(length_control_frame, text="12", width=5)
+        self.length_label.pack(side=tk.RIGHT)
         
-        # Содержание
-        ttk.Label(input_frame, text="Содержание:*").grid(row=6, column=0, sticky=tk.W, pady=(0, 5))
-        self.content_text = scrolledtext.ScrolledText(input_frame, width=40, height=10, wrap=tk.WORD)
-        self.content_text.grid(row=7, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
+        # Чекбоксы для выбора символов
+        ttk.Label(settings_frame, text="Использовать символы:").grid(row=2, column=0, sticky=tk.W, pady=(0, 5))
         
-        # Кнопка добавления
-        self.add_btn = tk.Button(input_frame, text="➕ Добавить заметку", 
-                                 bg=self.colors['button'], fg='white', font=('Arial', 10, 'bold'),
-                                 command=self.add_note, cursor='hand2')
-        self.add_btn.grid(row=8, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+        self.use_lowercase = tk.BooleanVar(value=True)
+        self.use_uppercase = tk.BooleanVar(value=True)
+        self.use_digits = tk.BooleanVar(value=True)
+        self.use_special = tk.BooleanVar(value=True)
         
-        # Примечание об обязательных полях
-        ttk.Label(input_frame, text="* - обязательные поля", font=('Arial', 8, 'italic')).grid(row=9, column=0, sticky=tk.W)
+        ttk.Checkbutton(settings_frame, text="Строчные буквы (a-z)", 
+                       variable=self.use_lowercase).grid(row=3, column=0, sticky=tk.W, pady=2)
+        ttk.Checkbutton(settings_frame, text="Заглавные буквы (A-Z)", 
+                       variable=self.use_uppercase).grid(row=4, column=0, sticky=tk.W, pady=2)
+        ttk.Checkbutton(settings_frame, text="Цифры (0-9)", 
+                       variable=self.use_digits).grid(row=5, column=0, sticky=tk.W, pady=2)
+        ttk.Checkbutton(settings_frame, text="Спецсимволы (!@#$%)", 
+                       variable=self.use_special).grid(row=6, column=0, sticky=tk.W, pady=2)
+        
+        # Кнопки генерации
+        btn_frame = ttk.Frame(settings_frame)
+        btn_frame.grid(row=7, column=0, pady=(20, 10), sticky=(tk.W, tk.E))
+        
+        self.generate_btn = tk.Button(btn_frame, text="🔐 Сгенерировать пароль",
+                                     bg=self.colors['button'], fg='white',
+                                     font=('Arial', 10, 'bold'),
+                                     command=self.generate_password, cursor='hand2')
+        self.generate_btn.pack(fill=tk.X, pady=(0, 5))
+        
+        self.generate_5_btn = tk.Button(btn_frame, text="📋 Сгенерировать 5 паролей",
+                                       bg=self.colors['accent'], fg='white',
+                                       command=self.generate_multiple_passwords, cursor='hand2')
+        self.generate_5_btn.pack(fill=tk.X)
+        
+        # Предустановки
+        ttk.Label(settings_frame, text="Быстрые настройки:").grid(row=8, column=0, sticky=tk.W, pady=(15, 5))
+        
+        presets_frame = ttk.Frame(settings_frame)
+        presets_frame.grid(row=9, column=0, sticky=(tk.W, tk.E))
+        
+        ttk.Button(presets_frame, text="Слабый (8 символов)", 
+                  command=lambda: self.apply_preset(8, True, False, False, False)).pack(fill=tk.X, pady=2)
+        ttk.Button(presets_frame, text="Средний (12 символов)", 
+                  command=lambda: self.apply_preset(12, True, True, True, False)).pack(fill=tk.X, pady=2)
+        ttk.Button(presets_frame, text="Сильный (16 символов)", 
+                  command=lambda: self.apply_preset(16, True, True, True, True)).pack(fill=tk.X, pady=2)
+        ttk.Button(presets_frame, text="Максимальный (32 символа)", 
+                  command=lambda: self.apply_preset(32, True, True, True, True)).pack(fill=tk.X, pady=2)
     
-    def create_notes_panel(self, parent):
-        """Панель со списком заметок"""
-        notes_frame = ttk.LabelFrame(parent, text="Список заметок", padding="10")
-        notes_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
+    def create_history_panel(self, parent):
+        """Панель истории паролей"""
+        history_frame = ttk.LabelFrame(parent, text="История паролей", padding="10")
+        history_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        # Создание Treeview с прокруткой
-        tree_frame = ttk.Frame(notes_frame)
+        # Treeview для истории
+        tree_frame = ttk.Frame(history_frame)
         tree_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         scrollbar = ttk.Scrollbar(tree_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.tree = ttk.Treeview(tree_frame, columns=('ID', 'Заголовок', 'Категория', 'Приоритет', 'Дата'),
-                                 show='headings', yscrollcommand=scrollbar.set, height=20)
+        self.history_tree = ttk.Treeview(tree_frame, 
+                                         columns=('id', 'password', 'length', 'date'),
+                                         show='headings', yscrollcommand=scrollbar.set, height=15)
         
-        # Настройка колонок
-        self.tree.heading('ID', text='ID')
-        self.tree.heading('Заголовок', text='Заголовок')
-        self.tree.heading('Категория', text='Категория')
-        self.tree.heading('Приоритет', text='Приоритет')
-        self.tree.heading('Дата', text='Дата создания')
+        self.history_tree.heading('id', text='№')
+        self.history_tree.heading('password', text='Пароль')
+        self.history_tree.heading('length', text='Длина')
+        self.history_tree.heading('date', text='Дата создания')
         
-        self.tree.column('ID', width=50, anchor='center')
-        self.tree.column('Заголовок', width=250)
-        self.tree.column('Категория', width=120)
-        self.tree.column('Приоритет', width=100, anchor='center')
-        self.tree.column('Дата', width=150, anchor='center')
+        self.history_tree.column('id', width=40, anchor='center')
+        self.history_tree.column('password', width=200)
+        self.history_tree.column('length', width=60, anchor='center')
+        self.history_tree.column('date', width=140, anchor='center')
         
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.tree.yview)
+        self.history_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.history_tree.yview)
         
-        # Привязка двойного клика для просмотра/удаления
-        self.tree.bind('<Double-Button-1>', self.view_or_delete_note)
+        # Привязка клика для копирования
+        self.history_tree.bind('<Double-Button-1>', self.copy_password_from_history)
         
-        # Кнопки управления
-        btn_frame = ttk.Frame(notes_frame)
-        btn_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
+        # Кнопки управления историей
+        btn_frame = ttk.Frame(history_frame)
+        btn_frame.grid(row=1, column=0, pady=(10, 0), sticky=(tk.W, tk.E))
         
-        self.delete_btn = tk.Button(btn_frame, text="🗑 Удалить выбранную", 
-                                   bg=self.colors['error'], fg='white',
-                                   command=self.delete_selected_note, cursor='hand2')
-        self.delete_btn.pack(side=tk.LEFT, padx=(0, 10))
+        self.copy_btn = tk.Button(btn_frame, text="📋 Копировать выбранный",
+                                 bg=self.colors['accent'], fg='white',
+                                 command=self.copy_selected_password, cursor='hand2')
+        self.copy_btn.pack(side=tk.LEFT, padx=(0, 5))
         
-        self.refresh_btn = tk.Button(btn_frame, text="🔄 Обновить", 
-                                    bg=self.colors['success'], fg='white',
-                                    command=self.refresh_notes_list, cursor='hand2')
-        self.refresh_btn.pack(side=tk.LEFT)
+        self.clear_btn = tk.Button(btn_frame, text="🗑 Очистить историю",
+                                  bg=self.colors['error'], fg='white',
+                                  command=self.clear_history, cursor='hand2')
+        self.clear_btn.pack(side=tk.LEFT)
         
-        notes_frame.columnconfigure(0, weight=1)
-        notes_frame.rowconfigure(0, weight=1)
+        history_frame.columnconfigure(0, weight=1)
+        history_frame.rowconfigure(0, weight=1)
         tree_frame.columnconfigure(0, weight=1)
         tree_frame.rowconfigure(0, weight=1)
     
-    def create_filter_panel(self, parent):
-        """Панель фильтрации"""
-        filter_frame = ttk.LabelFrame(parent, text="Фильтрация", padding="10")
-        filter_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+    def create_result_panel(self, parent):
+        """Панель результатов"""
+        result_frame = ttk.LabelFrame(parent, text="Сгенерированный пароль", padding="10")
+        result_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
         
-        # Фильтр по категории
-        ttk.Label(filter_frame, text="Категория:").grid(row=0, column=0, padx=(0, 10))
-        self.filter_category = ttk.Combobox(filter_frame, values=self.categories, width=15)
-        self.filter_category.grid(row=0, column=1, padx=(0, 20))
-        self.filter_category.set("Все")
+        # Поле для пароля
+        self.password_text = scrolledtext.ScrolledText(result_frame, height=3, 
+                                                       font=('Courier', 12), wrap=tk.WORD)
+        self.password_text.pack(fill=tk.X, pady=(0, 10))
         
-        # Фильтр по приоритету
-        ttk.Label(filter_frame, text="Приоритет:").grid(row=0, column=2, padx=(0, 10))
-        self.filter_priority = ttk.Combobox(filter_frame, values=["Все", "Высокий", "Средний", "Низкий"], width=12)
-        self.filter_priority.grid(row=0, column=3, padx=(0, 20))
-        self.filter_priority.set("Все")
+        # Индикатор сложности
+        strength_frame = ttk.Frame(result_frame)
+        strength_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Поиск
-        ttk.Label(filter_frame, text="Поиск:").grid(row=0, column=4, padx=(0, 10))
-        self.search_entry = ttk.Entry(filter_frame, width=30)
-        self.search_entry.grid(row=0, column=5, padx=(0, 10))
+        ttk.Label(strength_frame, text="Сложность:").pack(side=tk.LEFT, padx=(0, 10))
+        self.strength_label = ttk.Label(strength_frame, text="Не определен", 
+                                        foreground=self.colors['warning'])
+        self.strength_label.pack(side=tk.LEFT)
         
-        # Кнопка фильтрации
-        self.filter_btn = tk.Button(filter_frame, text="🔍 Применить фильтр", 
-                                   bg=self.colors['success'], fg='white',
-                                   command=self.apply_filter, cursor='hand2')
-        self.filter_btn.grid(row=0, column=6)
+        # Кнопки действий
+        action_frame = ttk.Frame(result_frame)
+        action_frame.pack(fill=tk.X)
         
-        # Кнопка сброса фильтра
-        self.reset_btn = tk.Button(filter_frame, text="✖ Сбросить", 
-                                  command=self.reset_filter, cursor='hand2')
-        self.reset_btn.grid(row=0, column=7, padx=(10, 0))
+        self.copy_result_btn = tk.Button(action_frame, text="📋 Копировать в буфер",
+                                        bg=self.colors['button'], fg='white',
+                                        command=self.copy_to_clipboard, cursor='hand2')
+        self.copy_result_btn.pack(side=tk.LEFT, padx=(0, 10))
         
-        # Привязка Enter для поиска
-        self.search_entry.bind('<Return>', lambda e: self.apply_filter())
+        self.save_btn = tk.Button(action_frame, text="💾 Сохранить в историю",
+                                 bg=self.colors['success'], fg='white',
+                                 command=self.save_current_to_history, cursor='hand2')
+        self.save_btn.pack(side=tk.LEFT)
+        
+        result_frame.columnconfigure(0, weight=1)
     
-    def validate_inputs(self) -> tuple[bool, str]:
-        """Валидация полей ввода"""
-        title = self.title_entry.get().strip()
-        if not title:
-            return False, "Заголовок не может быть пустым"
-        if len(title) > 100:
-            return False, "Заголовок не может превышать 100 символов"
-        
-        content = self.content_text.get("1.0", tk.END).strip()
-        if not content:
-            return False, "Содержание не может быть пустым"
-        if len(content) > 5000:
-            return False, "Содержание не может превышать 5000 символов"
-        
-        category = self.category_combo.get()
-        if not category:
-            return False, "Выберите категорию"
-        
-        return True, ""
+    def update_length_label(self, *args):
+        """Обновление метки длины пароля"""
+        self.length_label.config(text=str(self.length_var.get()))
     
-    def add_note(self):
-        """Добавление новой заметки"""
-        # Валидация
-        is_valid, error_msg = self.validate_inputs()
-        if not is_valid:
-            messagebox.showerror("Ошибка валидации", error_msg)
-            return
-        
+    def apply_preset(self, length, use_lower, use_upper, use_digits, use_special):
+        """Применение предустановки"""
+        self.length_var.set(length)
+        self.use_lowercase.set(use_lower)
+        self.use_uppercase.set(use_upper)
+        self.use_digits.set(use_digits)
+        self.use_special.set(use_special)
+        self.generate_password()
+    
+    def generate_password(self):
+        """Генерация одного пароля"""
         try:
-            note = Note(
-                title=self.title_entry.get().strip(),
-                content=self.content_text.get("1.0", tk.END).strip(),
-                priority=self.priority_var.get(),
-                category=self.category_combo.get(),
-                created_at="",  # Будет установлено в storage
-                note_id=0  # Будет установлено в storage
+            length = self.length_var.get()
+            
+            # Валидация
+            if length < 4:
+                messagebox.showerror("Ошибка", "Минимальная длина пароля - 4 символа")
+                return
+            if length > 128:
+                messagebox.showerror("Ошибка", "Максимальная длина пароля - 128 символов")
+                return
+            
+            if not (self.use_lowercase.get() or self.use_uppercase.get() or 
+                   self.use_digits.get() or self.use_special.get()):
+                messagebox.showerror("Ошибка", "Выберите хотя бы один тип символов")
+                return
+            
+            # Генерация пароля
+            password = self.generator.generate(
+                length, self.use_uppercase.get(), self.use_lowercase.get(),
+                self.use_digits.get(), self.use_special.get()
             )
             
-            self.storage.add_note(note)
-            messagebox.showinfo("Успех", "Заметка успешно добавлена!")
+            # Отображение
+            self.password_text.delete("1.0", tk.END)
+            self.password_text.insert("1.0", password)
             
-            # Очистка полей
-            self.title_entry.delete(0, tk.END)
-            self.content_text.delete("1.0", tk.END)
-            self.category_combo.set("Личное")
-            self.priority_var.set("Средний")
+            # Проверка сложности
+            strength = self.generator.check_strength(password)
+            self.strength_label.config(text=strength['level'], foreground=strength['color'])
             
-            # Обновление списка
-            self.refresh_notes_list()
+            # Сохраняем текущий пароль для возможного сохранения
+            self.current_password = password
             
         except ValueError as e:
             messagebox.showerror("Ошибка", str(e))
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось добавить заметку: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось сгенерировать пароль: {e}")
     
-    def delete_selected_note(self):
-        """Удаление выбранной заметки"""
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showwarning("Предупреждение", "Выберите заметку для удаления")
-            return
-        
-        note_id = int(self.tree.item(selected[0])['values'][0])
-        
-        if messagebox.askyesno("Подтверждение", "Вы уверены, что хотите удалить эту заметку?"):
-            if self.storage.remove_note(note_id):
-                messagebox.showinfo("Успех", "Заметка удалена")
-                self.refresh_notes_list()
-            else:
-                messagebox.showerror("Ошибка", "Не удалось удалить заметку")
+    def generate_multiple_passwords(self):
+        """Генерация нескольких паролей"""
+        try:
+            length = self.length_var.get()
+            
+            passwords = self.generator.generate_multiple(
+                5, length, self.use_uppercase.get(), self.use_lowercase.get(),
+                self.use_digits.get(), self.use_special.get()
+            )
+            
+            # Показываем в отдельном окне
+            self.show_multiple_passwords(passwords)
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка", str(e))
     
-    def view_or_delete_note(self, event):
-        """Просмотр или удаление по двойному клику"""
-        selected = self.tree.selection()
-        if not selected:
-            return
+    def show_multiple_passwords(self, passwords: List[str]):
+        """Отображение нескольких паролей в отдельном окне"""
+        win = tk.Toplevel(self.root)
+        win.title("Сгенерированные пароли")
+        win.geometry("500x400")
         
-        note_id = int(self.tree.item(selected[0])['values'][0])
-        note = next((n for n in self.storage.get_all_notes() if n.note_id == note_id), None)
-        
-        if note:
-            self.show_note_details(note)
-    
-    def show_note_details(self, note: Note):
-        """Показать подробности заметки в отдельном окне"""
-        detail_win = tk.Toplevel(self.root)
-        detail_win.title(f"Заметка #{note.note_id}")
-        detail_win.geometry("500x400")
-        
-        # Создание виджетов
-        frame = ttk.Frame(detail_win, padding="20")
+        frame = ttk.Frame(win, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
         
-        # Заголовок
-        ttk.Label(frame, text=f"Заголовок:", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
-        ttk.Label(frame, text=note.title, wraplength=450).pack(anchor=tk.W, pady=(0, 10))
+        text = scrolledtext.ScrolledText(frame, font=('Courier', 10))
+        text.pack(fill=tk.BOTH, expand=True)
         
-        # Категория и приоритет
-        info_frame = ttk.Frame(frame)
-        info_frame.pack(anchor=tk.W, pady=(0, 10))
-        ttk.Label(info_frame, text=f"Категория: {note.category}").pack(side=tk.LEFT, padx=(0, 20))
-        ttk.Label(info_frame, text=f"Приоритет: {note.priority}").pack(side=tk.LEFT)
+        for i, pwd in enumerate(passwords, 1):
+            text.insert(tk.END, f"{i}. {pwd}\n")
+            text.insert(tk.END, "=" * 50 + "\n")
         
-        # Дата
-        ttk.Label(frame, text=f"Создано: {note.created_at}", font=('Arial', 9, 'italic')).pack(anchor=tk.W, pady=(0, 10))
-        
-        # Содержание
-        ttk.Label(frame, text="Содержание:", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
-        content_frame = ttk.Frame(frame)
-        content_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 10))
-        
-        content_text = scrolledtext.ScrolledText(content_frame, wrap=tk.WORD)
-        content_text.pack(fill=tk.BOTH, expand=True)
-        content_text.insert("1.0", note.content)
-        content_text.config(state=tk.DISABLED)
-        
-        # Кнопки
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        tk.Button(btn_frame, text="Удалить", bg=self.colors['error'], fg='white',
-                 command=lambda: self.delete_from_detail(detail_win, note.note_id)).pack(side=tk.RIGHT, padx=(10, 0))
-        tk.Button(btn_frame, text="Закрыть", command=detail_win.destroy).pack(side=tk.RIGHT)
+        text.config(state=tk.DISABLED)
     
-    def delete_from_detail(self, window, note_id: int):
-        """Удаление из окна деталей"""
-        if messagebox.askyesno("Подтверждение", "Удалить эту заметку?"):
-            if self.storage.remove_note(note_id):
-                messagebox.showinfo("Успех", "Заметка удалена")
-                window.destroy()
-                self.refresh_notes_list()
-            else:
-                messagebox.showerror("Ошибка", "Не удалось удалить заметку")
+    def copy_to_clipboard(self):
+        """Копирование пароля в буфер обмена"""
+        password = self.password_text.get("1.0", tk.END).strip()
+        if password:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(password)
+            messagebox.showinfo("Успех", "Пароль скопирован в буфер обмена!")
+        else:
+            messagebox.showwarning("Предупреждение", "Сначала сгенерируйте пароль")
     
-    def refresh_notes_list(self):
-        """Обновление списка заметок"""
-        self.apply_filter()
+    def save_current_to_history(self):
+        """Сохранение текущего пароля в историю"""
+        password = self.password_text.get("1.0", tk.END).strip()
+        if not password:
+            messagebox.showwarning("Предупреждение", "Нет пароля для сохранения")
+            return
+        
+        settings = {
+            "length": self.length_var.get(),
+            "use_uppercase": self.use_uppercase.get(),
+            "use_lowercase": self.use_lowercase.get(),
+            "use_digits": self.use_digits.get(),
+            "use_special": self.use_special.get()
+        }
+        
+        if self.history.add_password(password, len(password), settings):
+            messagebox.showinfo("Успех", "Пароль сохранен в историю!")
+            self.refresh_history()
+        else:
+            messagebox.showerror("Ошибка", "Не удалось сохранить пароль")
     
-    def apply_filter(self):
-        """Применение фильтрации"""
-        category = self.filter_category.get()
-        priority = self.filter_priority.get()
-        search_text = self.search_entry.get()
+    def copy_selected_password(self):
+        """Копирование выбранного из истории"""
+        selected = self.history_tree.selection()
+        if not selected:
+            messagebox.showwarning("Предупреждение", "Выберите пароль из истории")
+            return
         
-        filtered_notes = self.storage.filter_notes(category, priority, search_text)
-        
+        password = self.history_tree.item(selected[0])['values'][1]
+        self.root.clipboard_clear()
+        self.root.clipboard_append(password)
+        messagebox.showinfo("Успех", "Пароль скопирован в буфер обмена!")
+    
+    def copy_password_from_history(self, event):
+        """Копирование по двойному клику"""
+        self.copy_selected_password()
+    
+    def refresh_history(self):
+        """Обновление списка истории"""
         # Очистка Treeview
-        for item in self.tree.get_children():
-            self.tree.delete(item)
+        for item in self.history_tree.get_children():
+            self.history_tree.delete(item)
         
-        # Добавление отфильтрованных заметок
-        for note in filtered_notes:
-            # Цветовая индикация приоритета
-            tag = ''
-            if note.priority == 'Высокий':
-                tag = 'high'
-            elif note.priority == 'Низкий':
-                tag = 'low'
-            
-            self.tree.insert('', tk.END, values=(note.note_id, note.title[:50], 
-                                                note.category, note.priority, note.created_at),
-                           tags=(tag,))
-        
-        # Настройка тегов
-        self.tree.tag_configure('high', background='#ffcccc')
-        self.tree.tag_configure('low', background='#ccffcc')
-        
-        # Обновление статуса
-        count = len(filtered_notes)
-        total = len(self.storage.get_all_notes())
-        self.root.title(f"Note Keeper - {count} из {total} заметок")
+        # Добавление записей
+        for entry in self.history.get_history():
+            self.history_tree.insert('', 'end', values=(
+                entry['id'], entry['password'][:30] + ('...' if len(entry['password']) > 30 else ''),
+                entry['length'], entry['created_at']
+            ))
     
-    def reset_filter(self):
-        """Сброс всех фильтров"""
-        self.filter_category.set("Все")
-        self.filter_priority.set("Все")
-        self.search_entry.delete(0, tk.END)
-        self.apply_filter()
+    def clear_history(self):
+        """Очистка истории"""
+        if messagebox.askyesno("Подтверждение", "Вы уверены, что хотите очистить всю историю?"):
+            if self.history.clear_history():
+                messagebox.showinfo("Успех", "История очищена")
+                self.refresh_history()
+            else:
+                messagebox.showerror("Ошибка", "Не удалось очистить историю")
 
 
 # Модульные тесты
-class TestNoteSystem(unittest.TestCase):
-    """Тестирование функциональности заметок"""
+class TestPasswordGenerator(unittest.TestCase):
+    """Тестирование генератора паролей"""
     
     def setUp(self):
-        """Подготовка к тестам"""
-        self.test_file = "test_notes.json"
-        self.storage = NoteStorage(self.test_file)
+        self.generator = PasswordGenerator()
+    
+    def test_generate_valid_password(self):
+        """Позитивный тест: генерация валидного пароля"""
+        password = self.generator.generate(12, True, True, True, True)
+        self.assertEqual(len(password), 12)
+    
+    def test_generate_min_length(self):
+        """Граничный тест: минимальная длина"""
+        password = self.generator.generate(4, True, True, True, True)
+        self.assertEqual(len(password), 4)
+    
+    def test_generate_max_length(self):
+        """Граничный тест: максимальная длина"""
+        password = self.generator.generate(128, True, True, True, True)
+        self.assertEqual(len(password), 128)
+    
+    def test_length_too_short(self):
+        """Негативный тест: слишком короткий пароль"""
+        with self.assertRaises(ValueError):
+            self.generator.generate(3, True, True, True, True)
+    
+    def test_length_too_long(self):
+        """Негативный тест: слишком длинный пароль"""
+        with self.assertRaises(ValueError):
+            self.generator.generate(129, True, True, True, True)
+    
+    def test_no_characters_selected(self):
+        """Негативный тест: не выбрано ни одного типа символов"""
+        with self.assertRaises(ValueError):
+            self.generator.generate(12, False, False, False, False)
+    
+    def test_only_lowercase(self):
+        """Позитивный тест: только строчные буквы"""
+        password = self.generator.generate(20, False, True, False, False)
+        self.assertTrue(all(c.islower() for c in password))
+    
+    def test_only_uppercase(self):
+        """Позитивный тест: только заглавные буквы"""
+        password = self.generator.generate(20, True, False, False, False)
+        self.assertTrue(all(c.isupper() for c in password))
+    
+    def test_only_digits(self):
+        """Позитивный тест: только цифры"""
+        password = self.generator.generate(20, False, False, True, False)
+        self.assertTrue(all(c.isdigit() for c in password))
+    
+    def test_check_strength(self):
+        """Позитивный тест: проверка сложности"""
+        strength = self.generator.check_strength("StrongP@ssw0rd123!")
+        self.assertIn('level', strength)
+        self.assertIn('score', strength)
+    
+    def test_generate_multiple(self):
+        """Позитивный тест: генерация нескольких паролей"""
+        passwords = self.generator.generate_multiple(5, 12, True, True, True, True)
+        self.assertEqual(len(passwords), 5)
+        self.assertTrue(all(len(p) == 12 for p in passwords))
+
+
+class TestPasswordHistory(unittest.TestCase):
+    """Тестирование истории паролей"""
+    
+    def setUp(self):
+        self.test_file = "test_history.json"
+        self.history = PasswordHistory(self.test_file)
     
     def tearDown(self):
-        """Очистка после тестов"""
         if os.path.exists(self.test_file):
             os.remove(self.test_file)
     
-    def test_create_valid_note(self):
-        """Позитивный тест: создание валидной заметки"""
-        note = Note(
-            title="Тестовая заметка",
-            content="Это тестовое содержание",
-            priority="Средний",
-            category="Тест",
-            created_at="",
-            note_id=0
-        )
-        self.assertEqual(note.title, "Тестовая заметка")
+    def test_add_password(self):
+        """Позитивный тест: добавление пароля"""
+        settings = {"length": 12}
+        result = self.history.add_password("TestPass123", 12, settings)
+        self.assertTrue(result)
+        self.assertEqual(len(self.history.get_history()), 1)
     
-    def test_invalid_title_empty(self):
-        """Негативный тест: пустой заголовок"""
-        with self.assertRaises(ValueError):
-            Note(title="", content="Контент", priority="Средний", 
-                category="Тест", created_at="", note_id=0)
-    
-    def test_invalid_title_too_long(self):
-        """Негативный тест: слишком длинный заголовок"""
-        long_title = "A" * 101
-        with self.assertRaises(ValueError):
-            Note(title=long_title, content="Контент", priority="Средний",
-                category="Тест", created_at="", note_id=0)
-    
-    def test_invalid_priority(self):
-        """Граничный тест: некорректный приоритет"""
-        with self.assertRaises(ValueError):
-            Note(title="Тест", content="Контент", priority="Неверный",
-                category="Тест", created_at="", note_id=0)
-    
-    def test_add_note_to_storage(self):
-        """Позитивный тест: добавление заметки в хранилище"""
-        note = Note(title="Тест", content="Контент", priority="Средний",
-                   category="Тест", created_at="", note_id=0)
-        success = self.storage.add_note(note)
-        self.assertTrue(success)
-        self.assertEqual(len(self.storage.get_all_notes()), 1)
-    
-    def test_remove_note(self):
-        """Позитивный тест: удаление заметки"""
-        note = Note(title="Тест", content="Контент", priority="Средний",
-                   category="Тест", created_at="", note_id=0)
-        self.storage.add_note(note)
-        note_id = self.storage.get_all_notes()[0].note_id
-        success = self.storage.remove_note(note_id)
-        self.assertTrue(success)
-        self.assertEqual(len(self.storage.get_all_notes()), 0)
-    
-    def test_filter_by_category(self):
-        """Позитивный тест: фильтрация по категории"""
-        note1 = Note(title="Работа", content="Контент1", priority="Высокий",
-                    category="Работа", created_at="", note_id=0)
-        note2 = Note(title="Личное", content="Контент2", priority="Низкий",
-                    category="Личное", created_at="", note_id=0)
-        self.storage.add_note(note1)
-        self.storage.add_note(note2)
-        
-        filtered = self.storage.filter_notes(category="Работа")
-        self.assertEqual(len(filtered), 1)
-        self.assertEqual(filtered[0].category, "Работа")
-    
-    def test_search_filter(self):
-        """Граничный тест: поиск по тексту"""
-        note = Note(title="Важная заметка", content="Содержание с ключевым словом",
-                   priority="Высокий", category="Работа", created_at="", note_id=0)
-        self.storage.add_note(note)
-        
-        filtered = self.storage.filter_notes(search_text="ключевым")
-        self.assertEqual(len(filtered), 1)
-    
-    def test_empty_search(self):
-        """Граничный тест: пустой поиск"""
-        note = Note(title="Тест", content="Контент", priority="Средний",
-                   category="Тест", created_at="", note_id=0)
-        self.storage.add_note(note)
-        
-        filtered = self.storage.filter_notes(search_text="")
-        self.assertEqual(len(filtered), 1)
+    def test_clear_history(self):
+        """Позитивный тест: очистка истории"""
+        settings = {"length": 12}
+        self.history.add_password("TestPass123", 12, settings)
+        self.history.clear_history()
+        self.assertEqual(len(self.history.get_history()), 0)
 
 
 def run_tests():
-    """Запуск тестов"""
-    # Создаем тестовый набор
+    """Запуск всех тестов"""
     loader = unittest.TestLoader()
-    suite = loader.loadTestsFromTestCase(TestNoteSystem)
+    suite = loader.loadTestsFromTestCase(TestPasswordGenerator)
+    suite.addTests(loader.loadTestsFromTestCase(TestPasswordHistory))
     
-    # Запускаем тесты
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
-    
     return result.wasSuccessful()
 
 
 def main():
-    """Главная функция приложения"""
-    # Спрашиваем, запускать ли тесты
-    print("Note Keeper - Менеджер заметок")
+    """Главная функция"""
+    print("=" * 60)
+    print("Random Password Generator v1.0.0")
     print("Автор: Иван Иванов")
-    print("Версия: 1.0.0")
-    print("-" * 50)
+    print("=" * 60)
     
-    run_tests_choice = input("Запустить тесты перед стартом? (y/n): ").lower()
-    if run_tests_choice == 'y':
+    # Запуск тестов
+    choice = input("\nЗапустить тесты перед стартом? (y/n): ").lower()
+    if choice == 'y':
         print("\nЗапуск тестов...")
         if run_tests():
             print("✅ Все тесты пройдены успешно!\n")
         else:
-            print("❌ Некоторые тесты не пройдены. Продолжить? (y/n): ")
-            if input().lower() != 'y':
+            print("❌ Некоторые тесты не пройдены")
+            if input("Продолжить? (y/n): ").lower() != 'y':
                 return
     
     # Запуск GUI
     root = tk.Tk()
-    app = NoteApp(root)
+    app = PasswordGeneratorApp(root)
     root.mainloop()
 
 
 if __name__ == "__main__":
     main()
-Инструкция по запуску и README для GitHub
-Создайте файл README.md для вашего репозитория:
-
-markdown
-# Note Keeper - Менеджер заметок
-
-![Python Version](https://img.shields.io/badge/python-3.7+-blue.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-
-## Описание проекта
-
-**Note Keeper** - это десктопное приложение для управления заметками с графическим интерфейсом, разработанное на Python с использованием Tkinter. Приложение позволяет создавать, хранить, фильтровать и удалять заметки с автоматическим сохранением в JSON-файл.
-
-### Возможности
-
-- ✅ Создание заметок с заголовком, содержанием, категорией и приоритетом
-- ✅ Автоматическая валидация ввода данных
-- ✅ Фильтрация заметок по категории, приоритету и поиску по тексту
-- ✅ Цветовая индикация приоритета (высокий - красный, низкий - зеленый)
-- ✅ Просмотр полного содержания заметки в отдельном окне
-- ✅ Сохранение и загрузка данных в JSON формате
-- ✅ Модульное тестирование всех функций
-- ✅ Интуитивно понятный интерфейс
-
-### Технологии
-
-- Python 3.7+
-- Tkinter (GUI)
-- JSON (хранение данных)
-- unittest (тестирование)
-- dataclasses
-
-## Установка и запуск
-
-### Требования
-
-- Python 3.7 или выше
-- Tkinter (обычно входит в стандартную установку Python)
-
-### Установка
-
-1. Клонируйте репозиторий:
-```bash
-git clone https://github.com/yourusername/note-keeper.git
-cd note-keeper
