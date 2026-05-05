@@ -3,7 +3,7 @@ python
 # -*- coding: utf-8 -*-
 """
 Note Keeper - Менеджер заметок с фильтрацией и JSON-хранилищем
-Author: Иван Иванов
+Author: Каюмов Марсель
 Version: 1.0.0
 """
 
